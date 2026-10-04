@@ -1,0 +1,23 @@
+FIELDNOTES — PRINTABLE FIELD JOURNAL
+Edition 1.1
+
+This replacement corrects the missing observation checklist in edition 1.0.
+
+Date:
+Location:
+Conditions:
+
+OBSERVATION
+What did you notice?
+
+EVIDENCE
+Record measurements, sketches, and references.
+
+QUESTIONS
+What would you investigate next?
+
+CHECKLIST
+[ ] Date and location recorded
+[ ] Observation separated from interpretation
+[ ] Evidence references included
+[ ] Follow-up question written

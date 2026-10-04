@@ -1,0 +1,28 @@
+LAUNCHLIST
+Edition 1.0
+
+Product: verify the primary user journey
+________________________________________________________
+
+Accessibility: keyboard, labels, contrast, narrow screens
+________________________________________________________
+
+Reliability: error states, retries, backups
+________________________________________________________
+
+Security: credentials excluded, permissions checked
+________________________________________________________
+
+Content: accurate claims, working links, current screenshots
+________________________________________________________
+
+Support: contact route, known limitations, refund policy
+________________________________________________________
+
+Release: version identifier, deployment check, rollback plan
+________________________________________________________
+
+After launch: collect feedback, inspect errors, prioritize fixes
+________________________________________________________
+
+Created for the Veylo testnet storefront demonstration.

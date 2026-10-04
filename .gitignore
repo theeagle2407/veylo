@@ -1,0 +1,11 @@
+node_modules/
+data/
+.env*
+.DS_Store
+*.log
+/data/
+*.age
+*.pem
+veylo-pass-*.json
+*.bak
+*.backup-*

@@ -1,0 +1,34 @@
+FRAMEBOOK
+Edition 1.0
+
+Screen name and user goal
+________________________________________________________
+
+Entry points and next actions
+________________________________________________________
+
+Primary action and supporting content
+________________________________________________________
+
+Information hierarchy
+________________________________________________________
+
+Empty state
+________________________________________________________
+
+Loading state
+________________________________________________________
+
+Error state and recovery
+________________________________________________________
+
+Success state
+________________________________________________________
+
+Keyboard and mobile behavior
+________________________________________________________
+
+Review: can a first-time user explain the next action?
+________________________________________________________
+
+Created for the Veylo testnet storefront demonstration.

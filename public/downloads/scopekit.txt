@@ -1,0 +1,34 @@
+SCOPEKIT
+Edition 1.0
+
+Project and owner
+________________________________________________________
+
+Problem and intended audience
+________________________________________________________
+
+Desired outcome and evidence of success
+________________________________________________________
+
+Included deliverables
+________________________________________________________
+
+Explicit exclusions
+________________________________________________________
+
+Milestones and responsibilities
+________________________________________________________
+
+Acceptance criteria for each deliverable
+________________________________________________________
+
+Dependencies and assumptions
+________________________________________________________
+
+Change request: impact on scope, schedule, and cost
+________________________________________________________
+
+Final approval record
+________________________________________________________
+
+Created for the Veylo testnet storefront demonstration.

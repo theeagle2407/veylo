@@ -1,0 +1,1 @@
+export const downloadFiles = Object.freeze({pixelpress:'pixelpress.zip',contour:'contour.zip',chime:'chime.zip',fieldnotes:'fieldnotes.txt',weekform:'weekform.txt',scopekit:'scopekit.txt',stillroom:'stillroom.txt',launchlist:'launchlist.txt',framebook:'framebook.txt'});

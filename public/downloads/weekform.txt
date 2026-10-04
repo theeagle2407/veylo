@@ -1,0 +1,31 @@
+WEEKFORM
+Edition 1.0
+
+Week commencing
+________________________________________________________
+
+Three outcomes that matter
+________________________________________________________
+
+Monday: focus / commitments
+________________________________________________________
+
+Tuesday: focus / commitments
+________________________________________________________
+
+Wednesday: focus / commitments
+________________________________________________________
+
+Thursday: focus / commitments
+________________________________________________________
+
+Friday: focus / commitments
+________________________________________________________
+
+Capacity check: what will you deliberately not do?
+________________________________________________________
+
+Weekly review: completed / carried forward / learned
+________________________________________________________
+
+Created for the Veylo testnet storefront demonstration.

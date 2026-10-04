@@ -1,0 +1,22 @@
+FIELDNOTES
+Edition 1.0
+
+Date and location
+________________________________________________________
+
+Conditions
+________________________________________________________
+
+Observation: what did you notice?
+________________________________________________________
+
+Evidence: measurements, sketches, references
+________________________________________________________
+
+Questions to investigate next
+________________________________________________________
+
+Checklist: separate observation from interpretation; record sources; write one follow-up question.
+________________________________________________________
+
+Created for the Veylo testnet storefront demonstration.
