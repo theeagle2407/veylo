@@ -1,0 +1,78 @@
+use clap::Subcommand;
+
+pub(crate) mod combine;
+pub(crate) mod create;
+pub(crate) mod create_manual;
+pub(crate) mod create_max;
+pub(crate) mod extract;
+pub(crate) mod inspect;
+pub(crate) mod pay_manual;
+pub(crate) mod plan_batches;
+pub(crate) mod prove;
+pub(crate) mod redact;
+pub(crate) mod send;
+pub(crate) mod send_without_storing;
+pub(crate) mod shield;
+pub(crate) mod sign;
+pub(crate) mod update_with_derivation;
+pub(crate) mod update_with_signature;
+
+#[cfg(feature = "pczt-qr")]
+pub(crate) mod qr;
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum Command {
+    /// Create a PCZT
+    Create(create::Command),
+    /// Create a PCZT that sends all funds within the account
+    CreateMax(create_max::Command),
+    /// Create a shielding PCZT
+    Shield(shield::Command),
+    /// Create a PCZT from manually-provided transparent inputs
+    CreateManual(create_manual::Command),
+    /// Create a PCZT to satisfy a payment request by spending manually-provided transparent
+    /// inputs.
+    PayManual(pay_manual::Command),
+    /// Inspect a PCZT
+    Inspect(inspect::Command),
+    /// Adds BIP 44 or ZIP 32 derivations to a PCZT
+    UpdateWithDerivation(update_with_derivation::Command),
+    /// Redact a PCZT
+    Redact(redact::Command),
+    /// Plan already-built unsigned PCZTs into Keystone-sized signing rounds by total action
+    /// count, and print ready-to-run to-qr-batch/from-qr-batch commands for each round
+    PlanBatches(plan_batches::Command),
+    /// Create proofs for a PCZT
+    Prove(prove::Command),
+    /// Apply signatures to a PCZT
+    Sign(sign::Command),
+    /// Adds an externally-created signature to a PCZT
+    UpdateWithSignature(update_with_signature::Command),
+    /// Combine two PCZTs
+    Combine(combine::Command),
+    /// Extract a finished transaction from a PCZT
+    Extract(extract::Command),
+    /// Extract a finished transaction and send it
+    Send(send::Command),
+    /// Extract a finished transaction and send it, without storing in the wallet.
+    ///
+    /// This should be used for PCZTs created with `pczt create-manual`.
+    SendWithoutStoring(send_without_storing::Command),
+    #[cfg(feature = "pczt-qr")]
+    /// Render a PCZT as an animated QR code
+    ToQr(qr::Send),
+    #[cfg(feature = "pczt-qr")]
+    /// Render multiple PCZTs as a single batch, animated QR code (Keystone's batch signing)
+    ToQrBatch(qr::SendBatch),
+    #[cfg(feature = "pczt-qr")]
+    /// Read a PCZT from an animated QR code via the webcam
+    FromQr(qr::Receive),
+    #[cfg(feature = "pczt-qr")]
+    /// Read a batch signing result from an animated QR code via the webcam, and apply the
+    /// signatures to the original unsigned PCZTs (in the same order given to `to-qr-batch`)
+    FromQrBatch(qr::ReceiveBatch),
+    #[cfg(feature = "pczt-qr")]
+    /// Combines `to-qr-batch` and `from-qr-batch` into one round trip: shows the outgoing batch
+    /// QR, then -- once you press Enter -- opens the camera and scans for the signed response
+    BatchSign(qr::BatchSign),
+}
