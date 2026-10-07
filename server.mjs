@@ -1,3 +1,4 @@
+import {hostingConfig} from './hosting.mjs';
 import {productStats} from './product-stats.mjs';
 import {MerchantCatalog,OWNER} from './merchant.mjs';
 import {downloadFiles} from './downloads.mjs';
@@ -24,7 +25,8 @@ const walletConfig={binary:process.env.VEYLO_WALLET_BINARY,directory:process.env
 if(live&&Object.values(walletConfig).some(v=>!v))throw Error('Missing testnet wallet settings. Run the setup script.');
 const payments=live?new Payments(store,new Wallet(walletConfig)):null;
 const code=process.env.VEYLO_SELLER_CODE||randomBytes(12).toString('hex'),sessions=new Map();
-const host='127.0.0.1',port=Number(process.env.PORT||3002),origin=`http://${host}:${port}`;
+const {host,port,origin,allowedHosts,allowedOrigins,secureCookie}=hostingConfig(process.env);
+if(host!=='127.0.0.1'&&!process.env.VEYLO_SELLER_CODE)throw Error('Public hosting requires VEYLO_SELLER_CODE.');
 const equal=(a,b)=>typeof a==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 function admin(req){const cookie=req.headers.cookie?.match(/(?:^|;\s*)veylo=([a-f0-9]+)/)?.[1];return cookie&&sessions.get(cookie)>Date.now();}
 function send(res,status,data){res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(data));}
@@ -36,19 +38,19 @@ const server=http.createServer(async(req,res)=>{
  res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');
  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
  try{
-  if(![`127.0.0.1:${port}`,`localhost:${port}`].includes(req.headers.host))return send(res,403,{error:'Local host required.'});
+  if(!allowedHosts.has(req.headers.host))return send(res,403,{error:'Host not allowed.'});
   const url=new URL(req.url,origin), route=url.pathname;
   if(req.method==='POST'){
-   if(![origin,`http://localhost:${port}`].includes(req.headers.origin))return send(res,403,{error:'Same-origin request required.'});
+   if(!allowedOrigins.has(req.headers.origin))return send(res,403,{error:'Same-origin request required.'});
    if(!req.headers['content-type']?.startsWith('application/json'))return send(res,415,{error:'JSON required.'});
    const now=Date.now(),key=req.socket.remoteAddress;let entry=limits.get(key);if(!entry||entry.until<now){entry={count:0,until:now+60000};limits.set(key,entry);}if(++entry.count>100)return send(res,429,{error:'Please wait a minute before trying again.'});
    if(route==='/api/seller/products/publish'&&!admin(req))return send(res,401,{error:'Seller sign-in required.'});
    const b=await body(req,route==='/api/seller/products/publish'?12*1024*1024:16384);
    if(route==='/api/seller/login'){
     if(!equal(b.code,code))return send(res,401,{error:'Seller access code is incorrect.'});
-    const token=randomBytes(32).toString('hex');sessions.set(token,Date.now()+8*3600000);res.setHeader('Set-Cookie',`veylo=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800`);return send(res,200,{ok:true});
+    const token=randomBytes(32).toString('hex');sessions.set(token,Date.now()+8*3600000);res.setHeader('Set-Cookie',`veylo=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie}`);return send(res,200,{ok:true});
    }
-   if(route==='/api/seller/logout'){const t=req.headers.cookie?.match(/veylo=([a-f0-9]+)/)?.[1];sessions.delete(t);res.setHeader('Set-Cookie','veylo=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return send(res,200,{ok:true});}
+   if(route==='/api/seller/logout'){const t=req.headers.cookie?.match(/veylo=([a-f0-9]+)/)?.[1];sessions.delete(t);res.setHeader('Set-Cookie',`veylo=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return send(res,200,{ok:true});}
    if(route.startsWith('/api/seller/')&&!admin(req))return send(res,401,{error:'Seller sign-in required.'});
    if(route==='/api/seller/profile')return send(res,200,merchant.profile(OWNER,b));
    if(route==='/api/seller/products/publish')return send(res,201,merchant.publish(OWNER,b));
@@ -88,5 +90,5 @@ const server=http.createServer(async(req,res)=>{
  }catch(error){send(res,400,{error:error.message||'Request failed.'});}
 });
 server.once('listening',()=>{if(payments){const stop=startRefundMonitor(payments,{onError:()=>console.error('Refund check unavailable; retrying automatically.')});server.once('close',stop);}});
-server.listen(port,host,()=>{console.log(`\nVeylo: http://localhost:${port}\nSeller access code: ${code}\n\n${live?'Zcash testnet payments enabled. Seller approves real testnet refunds.':'Local payment simulation. No ZEC is sent.'}\nKeep data/state.json private: it contains the merchant signing key.\n`);});
+server.listen(port,host,()=>{console.log(`\nVeylo: http://localhost:${port}\nSeller access code: ${host==='127.0.0.1'?code:'configured privately'}\n\n${live?'Zcash testnet payments enabled. Seller approves real testnet refunds.':'Local payment simulation. No ZEC is sent.'}\nKeep data/state.json private: it contains the merchant signing key.\n`);});
 server.on('error',e=>{console.error(e.code==='EADDRINUSE'?`Port ${port} is in use. Stop the previous server or run PORT=3003 npm run dev.`:e.message);process.exitCode=1;});

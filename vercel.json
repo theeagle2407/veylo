@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "buildCommand": null,
+  "outputDirectory": "vercel-public",
+  "rewrites": [
+    {
+      "source": "/:path*",
+      "destination": "https://clicking-ability-dealing-magnificent.trycloudflare.com/:path*"
+    }
+  ]
+}
