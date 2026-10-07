@@ -4,6 +4,10 @@
   "outputDirectory": "vercel-public",
   "rewrites": [
     {
+      "source": "/",
+      "destination": "https://clicking-ability-dealing-magnificent.trycloudflare.com/"
+    },
+    {
       "source": "/:path*",
       "destination": "https://clicking-ability-dealing-magnificent.trycloudflare.com/:path*"
     }
