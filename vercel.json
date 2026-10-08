@@ -4,6 +4,10 @@
   "outputDirectory": "vercel-public",
   "rewrites": [
     {
+      "source": "/",
+      "destination": "https://latter-expenditure-lafayette-independent.trycloudflare.com/"
+    },
+    {
       "source": "/:path*",
       "destination": "https://latter-expenditure-lafayette-independent.trycloudflare.com/:path*"
     }
