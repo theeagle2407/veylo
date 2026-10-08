@@ -4,12 +4,8 @@
   "outputDirectory": "vercel-public",
   "rewrites": [
     {
-      "source": "/",
-      "destination": "https://governments-dicke-defensive-roman.trycloudflare.com/"
-    },
-    {
       "source": "/:path*",
-      "destination": "https://governments-dicke-defensive-roman.trycloudflare.com/:path*"
+      "destination": "https://latter-expenditure-lafayette-independent.trycloudflare.com/:path*"
     }
   ]
 }
