@@ -7,8 +7,9 @@ export const testProduct={...product,asset:'TAZ'};
 const value=100000; // 0.001 TAZ, integer zatoshis
 export function shieldedTestAddress(s){return typeof s==='string'&&/^(utest1|ztestsapling1)[a-z0-9]{30,500}$/.test(s);}
 export class Payments {
- constructor(store,wallet){this.store=store;this.wallet=wallet;store.state.usedPayments??={};}
- async create(key,productId="fieldnotes"){const selected=this.store.productLookup(productId);return this.wallet.exclusive(async()=>{
+ constructor(store,wallet,actor=null){this.store=store;this.wallet=wallet;this.actor=actor;store.state.usedPayments??={};}
+ owns(p){return this.actor===null||((p?.item?.sellerId||'primary')===this.actor);}
+ async create(key,productId="fieldnotes"){const selected=this.store.productLookup(productId);if(!this.owns({item:selected}))throw Error('Wrong seller wallet.');return this.wallet.exclusive(async()=>{
   const {stdout,stderr=''}=await this.wallet.run(['generate-address',this.wallet.config.account]);
   const address=stdout.match(/^\s*Address:\s*(utest1[a-z0-9]+)\s*$/m)?.[1];
   if(!address||!`${stdout}\n${stderr}`.includes('Network: testnet'))throw Error('Seller wallet must generate a testnet Unified Address.');
@@ -19,7 +20,13 @@ export class Payments {
  });}
  async check(id,token){return this.wallet.exclusive(async()=>{
   const p=this.store.state.purchases[id],invoice=p?.payment;
+  if(!this.owns(p))throw Error('Wrong seller wallet.');
   if(!invoice||typeof token!=='string'||token.length!==invoice.token.length||!timingSafeEqual(Buffer.from(token),Buffer.from(invoice.token)))throw Error('Invalid checkout authorization.');
+  if(p.receipt){
+   const r=p.receipt,outputKey=r.payment?.outputKey;
+   if(r.id!==p.id||r.paymentMode!=='testnet'||!outputKey||this.store.state.usedPayments[outputKey]!==p.id||!this.store.validateReceipt(r))throw Error('Stored payment receipt needs review.');
+   return {status:'confirmed',receipt:r};
+  }
   const snapshot=await this.wallet.snapshot();
   const matches=findOutputs(snapshot,{account:this.wallet.config.account,memo:invoice.memo,value:invoice.value,direction:'receivedBy',afterHeight:invoice.afterHeight});
   if(matches.length>1)throw Error('Multiple matching payments; seller review required. Do not pay again.');
@@ -46,12 +53,13 @@ export class Payments {
   this.store.persist();return q;
  }
  async refresh(){return this.wallet.exclusive(async()=>{
-  const pending=Object.values(this.store.state.requests).filter(q=>['sending','unknown','broadcast'].includes(q.status));
+  const pending=Object.values(this.store.state.requests).filter(q=>this.owns(this.store.state.purchases[q.purchaseId])&&['sending','unknown','broadcast'].includes(q.status));
   if(!pending.length)return {checked:0};
   const snapshot=await this.wallet.snapshot();for(const q of pending)await this.reconcile(q,snapshot);return {checked:pending.length};
  });}
  async refund(id){return this.wallet.exclusive(async()=>{
   const q=this.store.state.requests[id],p=this.store.state.purchases[q?.purchaseId];
+  if(!this.owns(p))throw Error('Wrong seller wallet.');
   if(!q||p?.receipt?.paymentMode!=='testnet')throw Error('A testnet purchase is required.');
   if(q.status!=='requested')throw Error('Refund already attempted. Use Check confirmations; do not send again.');
   if(!shieldedTestAddress(q.destination))throw Error('Use a testnet shielded address.');
