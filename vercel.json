@@ -5,11 +5,11 @@
   "rewrites": [
     {
       "source": "/",
-      "destination": "https://clicking-ability-dealing-magnificent.trycloudflare.com/"
+      "destination": "https://exclusive-assigned-copy-independently.trycloudflare.com/"
     },
     {
       "source": "/:path*",
-      "destination": "https://clicking-ability-dealing-magnificent.trycloudflare.com/:path*"
+      "destination": "https://exclusive-assigned-copy-independently.trycloudflare.com/:path*"
     }
   ]
 }
