@@ -5,11 +5,11 @@
   "rewrites": [
     {
       "source": "/",
-      "destination": "https://exclusive-assigned-copy-independently.trycloudflare.com/"
+      "destination": "https://governments-dicke-defensive-roman.trycloudflare.com/"
     },
     {
       "source": "/:path*",
-      "destination": "https://exclusive-assigned-copy-independently.trycloudflare.com/:path*"
+      "destination": "https://governments-dicke-defensive-roman.trycloudflare.com/:path*"
     }
   ]
 }
