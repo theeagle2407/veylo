@@ -5,11 +5,11 @@
   "rewrites": [
     {
       "source": "/",
-      "destination": "https://latter-expenditure-lafayette-independent.trycloudflare.com/"
+      "destination": "https://cad-tips-importantly-diverse.trycloudflare.com/"
     },
     {
       "source": "/:path*",
-      "destination": "https://latter-expenditure-lafayette-independent.trycloudflare.com/:path*"
+      "destination": "https://cad-tips-importantly-diverse.trycloudflare.com/:path*"
     }
   ]
 }
