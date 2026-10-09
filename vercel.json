@@ -5,11 +5,11 @@
   "rewrites": [
     {
       "source": "/",
-      "destination": "https://cad-tips-importantly-diverse.trycloudflare.com/"
+      "destination": "https://table-pixels-closest-contain.trycloudflare.com/"
     },
     {
       "source": "/:path*",
-      "destination": "https://cad-tips-importantly-diverse.trycloudflare.com/:path*"
+      "destination": "https://table-pixels-closest-contain.trycloudflare.com/:path*"
     }
   ]
 }
