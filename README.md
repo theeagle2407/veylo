@@ -121,6 +121,25 @@ Included products are demonstration content committed to this repository. Their 
 - Validate purchase-pass recovery and refund expectations with independent users.
 - Seller connectors separate their local wallet signing from the web process; review this trust boundary and replace single-process storage before production use.
 
-## Evaluation
+## Try Veylo
 
-See the [judge walkthrough](docs/JUDGE-WALKTHROUGH.md) and [multi-seller setup and trust boundaries](docs/MULTI-SELLER.md). New sellers use a paired local connector; its wallet reports are trusted by the platform. Refunds require local SEND approval. The public prototype depends on the backend and tunnel remaining online.
+Public testnet prototype: [veylo-steel.vercel.app](https://veylo-steel.vercel.app/). Availability depends on the backend, tunnel and seller connectors remaining online. For a walkthrough without funds, use the local simulation described above.
+
+### Buyer flow
+
+1. Browse a product and start checkout. Use a compatible Zcash testnet wallet with the exact invoice address, amount and memo. Never send mainnet funds.
+2. Wait for payment detection and ten confirmations. Keep the saved checkout; retry verification if it is temporarily unavailable rather than sending another payment.
+3. Download the product and export the purchase pass. It contains a private purchase key, not a wallet recovery phrase.
+4. Restore the pass in another browser at the same website origin and verify download access.
+5. Request a refund to a testnet receiving address you control. Follow its status; after seller approval and a confirmed payout, further downloads are blocked under the receipt policy.
+
+### Seller flow
+
+1. Register a seller account and create a store profile.
+2. Follow the in-app wallet guide and [connector setup instructions](docs/MULTI-SELLER.md) to pair a compatible local testnet wallet.
+3. Keep the connector running and publish a product with its downloadable file and price.
+4. Inspect purchases and refund requests in the seller console.
+5. Approve a refund in the console, then review the amount, destination and reference in the local connector before entering `SEND`.
+6. Follow confirmation and reconciliation. Never manually repeat an uncertain payout.
+
+The platform trusts authenticated connector wallet reports. Refunds require seller approval and local send authorization; they are new transfers, not payment reversals. Cancelling checkout cannot cancel an already submitted blockchain transfer. Simulation results are not blockchain payment evidence.
