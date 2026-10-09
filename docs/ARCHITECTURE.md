@@ -22,7 +22,8 @@ The send path rechecks request state after wallet synchronization and persists t
 
 ## Boundaries
 
-- One configured merchant and wallet; no multi-tenant seller isolation.
+- A primary merchant wallet plus registered sellers with paired local connectors. Seller routes and products are scoped to store ownership; the platform trusts authenticated connector wallet reports. See [Multi-seller flow](MULTI-SELLER.md) for account binding, local refund approval and recovery limits.
+- One platform receipt-signing key shared across stores; independent seller receipt issuers are not implemented.
 - Merchant approval, not escrow or guaranteed refunds.
 - Purchase-backed reviews, not unique-person or Sybil-resistant reputation.
 - Local wallet evidence and merchant signatures, not public proof of a shielded amount.

@@ -33,4 +33,4 @@ The application still uses one process and local JSON persistence. It is not a h
 
 ## Validation
 
-60 automated tests passed, including an HTTP test with simulated wallet responses and a complete remote-wallet adapter test. Coverage includes publication ownership, private dashboards, cross-seller refund rejection, ten-confirmation receipts, refund reconciliation, local approval, operation replay and interrupted-send recovery. These tests do not replace a live payment and refund with the upgraded connector. The earlier acceptance record documents the original single-wallet flow.
+Run `npm test` on the current revision to verify the test count. Coverage includes an HTTP test with simulated wallet responses, a complete remote-wallet adapter test, publication ownership, private dashboards, cross-seller refund rejection, ten-confirmation receipts, refund reconciliation, local approval, operation replay and interrupted-send recovery. These tests do not replace a live payment and refund with the upgraded connector. The earlier acceptance record documents the original single-wallet flow.

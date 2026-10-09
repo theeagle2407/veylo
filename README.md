@@ -72,7 +72,7 @@ The receipt is a **merchant attestation**, not a zero-knowledge proof or an inde
 
 ## Validation
 
-Run `npm test` on the submitted revision for its current test result. The newer source reviewed on 9 October 2026 passed **61 automated tests** covering receipt tampering, request replay, destination substitution, downloads, pass restoration, refund decisions, payment matching, uncertain sends, persistence and checkout polling.
+The public source revision `ab61ef3` was checked on 9 October 2026 and passed **60 automated tests** covering receipt tampering, request replay, destination substitution, downloads, pass restoration, refund decisions, payment matching, uncertain sends, persistence and checkout polling. Run `npm test` on your checkout to verify its current result.
 
 The complete Contour acceptance flow used shielded testnet payments, not simulated transfers:
 
@@ -97,6 +97,8 @@ No production audit, merchant adoption or independent user study has been comple
 | `merchant.mjs`, `catalog.mjs` | Merchant catalogue and product lifecycle |
 | `downloads.mjs` | Purchase-authorized delivery |
 | `monitor.mjs` | Background reconciliation of pending refunds |
+| `seller-accounts.mjs` | Seller registration, sessions and store ownership |
+| `connector-jobs.mjs`, `connector-runner.mjs` | Seller wallet jobs, observations and refund execution |
 | `server.mjs` | HTTP routes, seller sessions and local persistence |
 | `public/` | Buyer and merchant interface |
 | `test/` | Automated behavioural and adversarial tests |
@@ -119,6 +121,6 @@ Included products are demonstration content committed to this repository. Their 
 - Validate purchase-pass recovery and refund expectations with independent users.
 - Seller connectors separate their local wallet signing from the web process; review this trust boundary and replace single-process storage before production use.
 
-## Submission and evaluation
+## Evaluation
 
-See [submission brief](docs/SUBMISSION.md), [judge walkthrough](docs/JUDGE-WALKTHROUGH.md) and [presentation script](docs/PITCH-SCRIPT.md). New sellers use a paired local connector; its wallet reports are trusted by the platform. Refunds require local SEND approval. The free public prototype depends on the builder backend and tunnel remaining online.
+See the [judge walkthrough](docs/JUDGE-WALKTHROUGH.md) and [multi-seller setup and trust boundaries](docs/MULTI-SELLER.md). New sellers use a paired local connector; its wallet reports are trusted by the platform. Refunds require local SEND approval. The public prototype depends on the backend and tunnel remaining online.
