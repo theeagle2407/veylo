@@ -11,7 +11,7 @@ import {generateKeyPairSync,sign} from 'node:crypto';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 test('HTTP seller routes require authentication; published file can only be downloaded with purchase authorization',async t=>{
  const probe=net.createServer();probe.listen(0,'127.0.0.1');await once(probe,'listening');const port=probe.address().port;await new Promise(r=>probe.close(r));
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'veylo-http-'));const child=spawn(process.execPath,['server.mjs'],{cwd:root,env:{...process.env,PORT:String(port),VEYLO_DATA_DIR:dir,VEYLO_PAYMENT_MODE:'simulation',VEYLO_SELLER_CODE:'integration-secret'},stdio:['ignore','pipe','pipe']});
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'veylo-http-'));const child=spawn(process.execPath,['server.mjs'],{cwd:root,env:{...Object.fromEntries(Object.entries(process.env).filter(([name])=>!name.startsWith('VEYLO_'))),PORT:String(port),VEYLO_DATA_DIR:dir,VEYLO_PAYMENT_MODE:'simulation',VEYLO_SELLER_CODE:'integration-secret'},stdio:['ignore','pipe','pipe']});
  t.after(async()=>{if(child.exitCode===null){child.kill();await once(child,'exit');}fs.rmSync(dir,{recursive:true,force:true});});
  await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Server startup timed out')),5000);child.stdout.on('data',b=>{if(String(b).includes('Veylo:')){clearTimeout(timer);resolve();}});child.once('exit',c=>{clearTimeout(timer);reject(Error('Server exited '+c));});});
  const base=`http://127.0.0.1:${port}`;let cookie='';const req=async(route,data,auth=true)=>{const r=await fetch(base+route,{method:data?'POST':'GET',headers:{Origin:base,...(data?{'Content-Type':'application/json'}:{}),...(auth&&cookie?{Cookie:cookie}:{})},body:data?JSON.stringify(data):undefined});return r;};
@@ -28,4 +28,23 @@ test('HTTP seller routes require authentication; published file can only be down
  response=await req('/api/download',{request,signature});assert.equal(response.status,200);assert.equal(await response.text(),'Exact downloadable bytes');assert.equal((await req('/api/download',{request,signature})).status,400);
  assert.equal((await req('/data/assets/'+receipt.delivery.sha256)).status,404);
  await req('/api/seller/logout',{});assert.equal((await req('/api/seller/products')).status,401);
+ const register=async username=>{const r=await req('/api/store-account/register',{username,password:'a sufficiently long test password',name:username});assert.equal(r.status,200);cookie=r.headers.get('set-cookie').split(';')[0];return r.json();};
+ const alice=await register('alice');const aliceCookie=cookie;
+ assert.equal((await (await req('/api/seller')).json()).purchases,0);
+ assert.equal((await (await req('/api/seller/products')).json()).products.length,0);
+ assert.equal((await req('/api/seller/products/status',{id:p.id,status:'archived'})).status,400);
+ assert.equal((await req('/api/seller/notices',{productId:p.id,title:'Wrong store',body:'Cannot change this'})).status,400);
+ assert.equal((await req('/api/seller/products/publish',input)).status,400);
+ let draft=await (await req('/api/store-account/draft',{name:'Alice only',description:'Private draft',sellerId:'primary'})).json();assert.equal(draft.drafts.length,1);assert.equal(draft.canPublish,false);
+ cookie='';const bob=await register('bob');assert.notEqual(alice.id,bob.id);
+ assert.equal((await (await req('/api/store-account')).json()).drafts.length,0);
+ assert.equal((await req('/api/store-account/publish',{})).status,403);
+ cookie=aliceCookie;
+ assert.equal((await (await req('/api/store-account')).json()).drafts[0].name,'Alice only');
+ await req('/api/store-account/logout',{});assert.equal((await req('/api/store-account')).status,401);
+ const signed=await req('/api/store-account/login',{username:'ALICE',password:'a sufficiently long test password'});assert.equal(signed.status,200);
+ cookie=signed.headers.get('set-cookie').split(';')[0];
+ assert.equal((await (await req('/api/store-account')).json()).drafts.length,1);
+ const persisted=JSON.parse(fs.readFileSync(path.join(dir,'state.json')));assert(!JSON.stringify(persisted.sellerAccounts).includes('a sufficiently long test password'));
+
 });

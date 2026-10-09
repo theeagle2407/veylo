@@ -1,3 +1,5 @@
+import {ConnectorJobs,RemoteWallet} from './connector-jobs.mjs';
+import {SellerAccounts} from './seller-accounts.mjs';
 import {hostingConfig} from './hosting.mjs';
 import {productStats} from './product-stats.mjs';
 import {MerchantCatalog,OWNER} from './merchant.mjs';
@@ -17,13 +19,23 @@ const dir=process.env.VEYLO_DATA_DIR||path.join(root,'data');fs.mkdirSync(dir,{r
 const filename=path.join(dir,'state.json');
 function save(s){fs.writeFileSync(filename+'.tmp',JSON.stringify(s),{mode:0o600});fs.renameSync(filename+'.tmp',filename);}
 const store=new Store(fs.existsSync(filename)?JSON.parse(fs.readFileSync(filename,'utf8')):newState(),save);save(store.state);
+const accounts=new SellerAccounts(store);
+const accountToken=req=>req.headers.cookie?.match(/(?:^|;\s*)veylo_account=([a-f0-9]{64})(?:;|$)/)?.[1];
 const merchant=new MerchantCatalog(store,{root,assetDir:path.join(dir,'assets')});
 store.productLookup=(id,archived=false)=>merchant.get(id,archived);
 const live=process.env.VEYLO_PAYMENT_MODE==='testnet';
 if(process.env.VEYLO_PAYMENT_MODE&&!['testnet','simulation'].includes(process.env.VEYLO_PAYMENT_MODE))throw Error('Invalid payment mode.');
 const walletConfig={binary:process.env.VEYLO_WALLET_BINARY,directory:process.env.VEYLO_SELLER_WALLET,identity:process.env.VEYLO_SELLER_IDENTITY,account:process.env.VEYLO_SELLER_ACCOUNT};
 if(live&&Object.values(walletConfig).some(v=>!v))throw Error('Missing testnet wallet settings. Run the setup script.');
-const payments=live?new Payments(store,new Wallet(walletConfig)):null;
+const payments=live?new Payments(store,new Wallet(walletConfig),OWNER):null;
+const jobs=new ConnectorJobs(store,accounts),remotePayments=new Map();
+function sellerPayments(actor){if(actor===OWNER)return payments;if(!live)throw Error('New seller payments require testnet mode.');if(!remotePayments.has(actor))remotePayments.set(actor,new Payments(store,new RemoteWallet(actor,jobs),actor));return remotePayments.get(actor);}
+function purchaseOwner(id){const p=store.state.purchases[id];if(!p)throw Error('Purchase not found.');return p.item?.sellerId||OWNER;}
+function requestOwner(id){const q=store.state.requests[id];if(!q)throw Error('Request not found.');return purchaseOwner(q.purchaseId);}
+function sellerActor(req){if(admin(req))return OWNER;try{return accounts.actor(accountToken(req));}catch{return null;}}
+function requireOwnRequest(actor,id){if(requestOwner(id)!==actor)throw Error('Request not found.');}
+function requireOwnProduct(actor,id){if(merchant.get(id,true).sellerId!==actor)throw Error('Product not found.');}
+function publishing(actor){if(actor!==OWNER&&(!live||!accounts.view(actor).canPublish))throw Error('Start the updated payment connector before publishing.');}
 const code=process.env.VEYLO_SELLER_CODE||randomBytes(12).toString('hex'),sessions=new Map();
 const {host,port,origin,allowedHosts,allowedOrigins,secureCookie}=hostingConfig(process.env);
 if(host!=='127.0.0.1'&&!process.env.VEYLO_SELLER_CODE)throw Error('Public hosting requires VEYLO_SELLER_CODE.');
@@ -40,25 +52,55 @@ const server=http.createServer(async(req,res)=>{
  try{
   if(!allowedHosts.has(req.headers.host))return send(res,403,{error:'Host not allowed.'});
   const url=new URL(req.url,origin), route=url.pathname;
+  if(req.method==='POST'&&route.startsWith('/api/connector/')){
+   if(req.headers.origin||req.headers.cookie)return send(res,403,{error:'Use the terminal connector.'});
+   const token=req.headers.authorization?.match(/^Bearer ([a-f0-9]{64})$/)?.[1];
+   try{jobs.actor(token);}catch{return send(res,401,{error:'Connector authentication rejected.'});}
+   const b=await body(req,2*1024*1024);
+   if(route==='/api/connector/heartbeat')return send(res,200,accounts.heartbeat(token,b));
+   if(route==='/api/connector/poll')return send(res,200,{jobs:jobs.poll(token)});
+   if(route==='/api/connector/claim')return send(res,200,jobs.claim(token,b.id));
+   if(route==='/api/connector/complete')return send(res,200,jobs.complete(token,b.id,b.result));
+   return send(res,404,{error:'Not found.'});
+  }
   if(req.method==='POST'){
    if(!allowedOrigins.has(req.headers.origin))return send(res,403,{error:'Same-origin request required.'});
    if(!req.headers['content-type']?.startsWith('application/json'))return send(res,415,{error:'JSON required.'});
    const now=Date.now(),key=req.socket.remoteAddress;let entry=limits.get(key);if(!entry||entry.until<now){entry={count:0,until:now+60000};limits.set(key,entry);}if(++entry.count>100)return send(res,429,{error:'Please wait a minute before trying again.'});
-   if(route==='/api/seller/products/publish'&&!admin(req))return send(res,401,{error:'Seller sign-in required.'});
+   if(route==='/api/seller/products/publish'&&!sellerActor(req))return send(res,401,{error:'Seller sign-in required.'});
    const b=await body(req,route==='/api/seller/products/publish'?12*1024*1024:16384);
+   if(route.startsWith('/api/store-account/')){
+    const action=route.slice('/api/store-account/'.length);
+    if(action==='register'||action==='login'){
+     const token=await accounts[action](b);
+     const previous=req.headers.cookie?.match(/(?:^|;\s*)veylo=([a-f0-9]+)/)?.[1];sessions.delete(previous);
+     accounts.sessions.delete(accountToken(req));
+     res.setHeader('Set-Cookie',[`veylo_account=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie}`,`veylo=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`]);
+     return send(res,200,accounts.view(accounts.actor(token)));
+    }
+    if(action==='logout'){accounts.sessions.delete(accountToken(req));res.setHeader('Set-Cookie',`veylo_account=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return send(res,200,{ok:true});}
+    let actor;try{actor=accounts.actor(accountToken(req));}catch{return send(res,401,{error:'Seller sign-in required.'});}
+    if(action==='pair')return send(res,200,accounts.pair(actor));
+    if(action==='disconnect')return send(res,200,accounts.disconnect(actor));
+    if(action==='profile')return send(res,200,accounts.profile(actor,b));
+    if(action==='draft')return send(res,201,accounts.draft(actor,b));
+    return send(res,403,{error:'Connect a seller wallet before publishing or accepting payments.'});
+   }
    if(route==='/api/seller/login'){
+    accounts.sessions.delete(accountToken(req));
     if(!equal(b.code,code))return send(res,401,{error:'Seller access code is incorrect.'});
     const token=randomBytes(32).toString('hex');sessions.set(token,Date.now()+8*3600000);res.setHeader('Set-Cookie',`veylo=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secureCookie}`);return send(res,200,{ok:true});
    }
-   if(route==='/api/seller/logout'){const t=req.headers.cookie?.match(/veylo=([a-f0-9]+)/)?.[1];sessions.delete(t);res.setHeader('Set-Cookie',`veylo=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return send(res,200,{ok:true});}
-   if(route.startsWith('/api/seller/')&&!admin(req))return send(res,401,{error:'Seller sign-in required.'});
-   if(route==='/api/seller/profile')return send(res,200,merchant.profile(OWNER,b));
-   if(route==='/api/seller/products/publish')return send(res,201,merchant.publish(OWNER,b));
-   if(route==='/api/seller/products/status')return send(res,200,merchant.setStatus(OWNER,b.id,b.status));
-   if(route==='/api/purchases')return send(res,201,live?await payments.create(b.key,b.productId):store.createPurchase(b.key,b.productId));
-   if(route==='/api/check-payment'){if(!live)throw Error('Testnet mode is not enabled.');return send(res,200,await payments.check(b.id,b.token));}
-   if(route==='/api/seller/check-refunds'){if(!live)throw Error('Testnet mode is not enabled.');return send(res,200,await payments.refresh());}
-   if(route==='/api/seller/send-refund'){if(!live)throw Error('Testnet mode is not enabled.');return send(res,200,await payments.refund(b.id));}
+   if(route==='/api/seller/logout'){accounts.sessions.delete(accountToken(req));const t=req.headers.cookie?.match(/veylo=([a-f0-9]+)/)?.[1];sessions.delete(t);res.setHeader('Set-Cookie',`veylo=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureCookie}`);return send(res,200,{ok:true});}
+   const actor=sellerActor(req);
+   if(route.startsWith('/api/seller/')&&!actor)return send(res,401,{error:'Seller sign-in required.'});
+   if(route==='/api/seller/profile')return send(res,200,actor===OWNER?merchant.profile(actor,b):accounts.profile(actor,b));
+   if(route==='/api/seller/products/publish'){publishing(actor);return send(res,201,merchant.publish(actor,b));}
+   if(route==='/api/seller/products/status'){if(b.status==='published')publishing(actor);return send(res,200,merchant.setStatus(actor,b.id,b.status));}
+   if(route==='/api/purchases')return send(res,201,live?await sellerPayments(merchant.get(b.productId).sellerId).create(b.key,b.productId):store.createPurchase(b.key,b.productId));
+   if(route==='/api/check-payment'){if(!live)throw Error('Testnet mode is not enabled.');return send(res,200,await sellerPayments(purchaseOwner(b.id)).check(b.id,b.token));}
+   if(route==='/api/seller/check-refunds'){if(!live)throw Error('Testnet mode is not enabled.');return send(res,200,await sellerPayments(actor).refresh());}
+   if(route==='/api/seller/send-refund'){if(!live)throw Error('Testnet mode is not enabled.');requireOwnRequest(actor,b.id);return send(res,200,await sellerPayments(actor).refund(b.id));}
    if(route==='/api/simulate-payment')return send(res,200,store.simulatePayment(b.id));
    if(route==='/api/challenges')return send(res,200,store.issueChallenge(b.id));
    if(route==='/api/reviews')return send(res,200,store.writeReview(b.request,b.signature));
@@ -73,22 +115,34 @@ const server=http.createServer(async(req,res)=>{
    if(route==='/api/purchase-status')return send(res,200,store.purchaseStatus(b.request,b.signature));
    if(route==='/api/refunds/withdraw')return send(res,200,store.withdrawRefund(b.request,b.signature));
    if(route==='/api/refunds'){if(store.state.purchases[b.request?.purchaseId]?.receipt?.paymentMode==='testnet'&&!shieldedTestAddress(b.request?.destination))throw Error('Enter a shielded testnet receiving address.');return send(res,201,store.requestRefund(b.request,b.signature));}
-   if(route==='/api/seller/decline-refund')return send(res,200,store.declineRefund(b.id,b.reason));
-   if(route==='/api/seller/notices')return send(res,201,store.publishNotice(b));
-   if(route==='/api/seller/simulate-refund')return send(res,200,store.simulateRefund(b.id));
+   if(route==='/api/seller/decline-refund'){requireOwnRequest(actor,b.id);return send(res,200,store.declineRefund(b.id,b.reason));}
+   if(route==='/api/seller/notices'){requireOwnProduct(actor,b.productId||'fieldnotes');return send(res,201,store.publishNotice(b));}
+   if(route==='/api/seller/simulate-refund'){requireOwnRequest(actor,b.id);return send(res,200,store.simulateRefund(b.id));}
   }
   if(req.method==='GET'){
-   if(route==='/api/product'){const p=merchant.get(url.searchParams.get('id'),true);return send(res,200,{product:{...merchant.publicItem(p),asset:live?'TAZ':'ZEC'},store:merchant.data().profile,stats:productStats(store,p.id,live?'testnet':'simulation'),refundOffered:store.state.notices.some(n=>n.product===p.id&&n.version===p.version&&n.refundAvailable)});}
+   if(route==='/api/store-account'){try{return send(res,200,accounts.view(accounts.actor(accountToken(req))));}catch{return send(res,401,{error:'Seller sign-in required.'});}}
+
+   if(route==='/api/product'){const p=merchant.get(url.searchParams.get('id'),true);return send(res,200,{product:{...merchant.publicItem(p),asset:live?'TAZ':'ZEC'},store:merchant.profileFor(p.sellerId),stats:productStats(store,p.id,live?'testnet':'simulation'),refundOffered:store.state.notices.some(n=>n.product===p.id&&n.version===p.version&&n.refundAvailable)});}
    if(route==='/api/catalog')return send(res,200,{product:live?testProduct:product,products:merchant.list().map(p=>({...p,asset:live?'TAZ':'ZEC'})),legacyProducts:merchant.archived().map(p=>({...p,asset:live?'TAZ':'ZEC'})),store:merchant.data().profile,merchantKey:store.state.publicKey,paymentMode:live?'testnet':'simulation'});
    if(route==='/api/reviews')return send(res,200,store.publicReviews());
    if(route==='/api/notices')return send(res,200,store.state.notices);
-   if(route==='/api/seller/products'){if(!admin(req))return send(res,401,{error:'Seller sign-in required.'});return send(res,200,merchant.dashboard(OWNER));}
-   if(route==='/api/seller'){if(!admin(req))return send(res,401,{error:'Seller sign-in required.'});return send(res,200,{requests:Object.values(store.state.requests).map(q=>({...q,productId:store.state.purchases[q.purchaseId]?.receipt?.product,paymentMode:store.state.purchases[q.purchaseId]?.receipt?.paymentMode,asset:store.state.purchases[q.purchaseId]?.receipt?.asset})),notices:store.state.notices,purchases:Object.values(store.state.purchases).filter(p=>p.receipt).length});}
+   if(route==='/api/seller/products'){if(!sellerActor(req))return send(res,401,{error:'Seller sign-in required.'});return send(res,200,merchant.dashboard(sellerActor(req)));}
+   if(route==='/api/seller'){if(!sellerActor(req))return send(res,401,{error:'Seller sign-in required.'});return send(res,200,{requests:Object.values(store.state.requests).filter(q=>requestOwner(q.id)===sellerActor(req)).map(q=>({...q,productId:store.state.purchases[q.purchaseId]?.receipt?.product,paymentMode:store.state.purchases[q.purchaseId]?.receipt?.paymentMode,asset:store.state.purchases[q.purchaseId]?.receipt?.asset})),notices:store.state.notices.filter(n=>merchant.get(n.product,true).sellerId===sellerActor(req)),purchases:Object.values(store.state.purchases).filter(p=>p.receipt&&purchaseOwner(p.id)===sellerActor(req)).length});}
    if(files[route]){const ext=path.extname(files[route]);res.writeHead(200,{'Content-Type':({'.html':'text/html; charset=utf-8','.css':'text/css','.js':'text/javascript','.mjs':'text/javascript','.txt':'text/plain; charset=utf-8'})[ext],'Cache-Control':'no-store'});return res.end(fs.readFileSync(path.join(root,'public',files[route])));}
   }
   send(res,404,{error:'Not found.'});
  }catch(error){send(res,400,{error:error.message||'Request failed.'});}
 });
-server.once('listening',()=>{if(payments){const stop=startRefundMonitor(payments,{onError:()=>console.error('Refund check unavailable; retrying automatically.')});server.once('close',stop);}});
+server.once('listening',()=>{
+ if(!payments)return;
+ const monitor={async refresh(){
+  await payments.refresh();
+  for(const actor of Object.keys(accounts.data())){
+   if(accounts.view(actor).canPublish){try{await sellerPayments(actor).refresh();}catch{console.error('Seller refund check pending.');}}
+  }
+ }};
+ const stop=startRefundMonitor(monitor,{onError:()=>console.error('Refund check unavailable; retrying automatically.')});
+ server.once('close',stop);
+});
 server.listen(port,host,()=>{console.log(`\nVeylo: http://localhost:${port}\nSeller access code: ${host==='127.0.0.1'?code:'configured privately'}\n\n${live?'Zcash testnet payments enabled. Seller approves real testnet refunds.':'Local payment simulation. No ZEC is sent.'}\nKeep data/state.json private: it contains the merchant signing key.\n`);});
 server.on('error',e=>{console.error(e.code==='EADDRINUSE'?`Port ${port} is in use. Stop the previous server or run PORT=3003 npm run dev.`:e.message);process.exitCode=1;});

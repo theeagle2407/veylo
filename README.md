@@ -10,7 +10,7 @@ The working integration uses **Zcash testnet**. Payments and approved refunds ar
 
 ## Intended users and product hypothesis
 
-Veylo targets independent creators selling downloadable assets to buyers who want purchase access without an email account. The first use cases are design assets, templates, audio packs and practical digital tools. The current implementation serves one merchant; open seller registration is not built.
+Veylo targets independent creators selling downloadable assets to buyers who want purchase access without an email account. The first use cases are design assets, templates, audio packs and practical digital tools. The newer implementation supports independent seller accounts, seller-owned products and paired local wallet connectors.
 
 The hypothesis is that a portable purchase credential can support delivery, updates and refunds without requiring a shared customer identity. The next validation step is independent buyers completing purchase, recovery and refund tasks, with time to completion, recovery success and seller support effort recorded. Demand and willingness to pay remain unvalidated. A future hosted merchant service is a business hypothesis, not an operating revenue model.
 
@@ -26,7 +26,7 @@ The hypothesis is that a portable purchase credential can support delivery, upda
 | Withdraw an unprocessed request to correct it | Reconcile uncertain sends without automatically paying twice |
 | Leave or edit one public review per purchase | Archive products while preserving existing purchases |
 
-This is a **single-merchant storefront**, not an open marketplace with independent seller accounts. Refunds require merchant approval. Veylo cannot reverse a payment or force reimbursement.
+Sellers can register independent stores, publish their own products and pair local wallet connectors. The platform remains a prototype with explicit seller trust boundaries. Refunds require merchant approval. Veylo cannot reverse a payment or force reimbursement.
 
 ## Run a local walkthrough
 
@@ -72,7 +72,7 @@ The receipt is a **merchant attestation**, not a zero-knowledge proof or an inde
 
 ## Validation
 
-The current suite contains **51 passing automated tests** covering receipt tampering, request replay, destination substitution, downloads, pass restoration, refund decisions, payment matching, uncertain sends, persistence and checkout polling.
+Run `npm test` on the submitted revision for its current test result. The newer source reviewed on 9 October 2026 passed **61 automated tests** covering receipt tampering, request replay, destination substitution, downloads, pass restoration, refund decisions, payment matching, uncertain sends, persistence and checkout polling.
 
 The complete Contour acceptance flow used shielded testnet payments, not simulated transfers:
 
@@ -117,4 +117,8 @@ Included products are demonstration content committed to this repository. Their 
 - Independently reproduce the preserved wallet build and complete a fresh acceptance run.
 - Publish a complete purchase-to-refund screen recording with confirmation waits clearly disclosed.
 - Validate purchase-pass recovery and refund expectations with independent users.
-- Separate wallet signing from the web process and replace single-process storage before public operation.
+- Seller connectors separate their local wallet signing from the web process; review this trust boundary and replace single-process storage before production use.
+
+## Submission and evaluation
+
+See [submission brief](docs/SUBMISSION.md), [judge walkthrough](docs/JUDGE-WALKTHROUGH.md) and [presentation script](docs/PITCH-SCRIPT.md). New sellers use a paired local connector; its wallet reports are trusted by the platform. Refunds require local SEND approval. The free public prototype depends on the builder backend and tunnel remaining online.

@@ -28,3 +28,5 @@
 @media(max-width:520px){.refund-stages{grid-template-columns:repeat(2,minmax(0,1fr))}.refund-tracker-head{align-items:flex-start;flex-direction:column;gap:4px}.refund-facts>div{grid-template-columns:1fr;gap:2px}}
 
 .guide-audiences{display:flex;gap:10px;margin:0 0 24px}.guide-faq{margin-top:28px}.guide-faq details{padding:20px 28px;border-top:1px solid #e5e9e3}.guide-faq summary{cursor:pointer;font-weight:600;line-height:1.5}.guide-faq details p{max-width:800px;line-height:1.75;color:#647066;margin:14px 0 0}@media(max-width:600px){.guide-faq details{padding:18px 20px}}
+
+.wallet-guide{max-width:960px;margin:0 auto}.wallet-guide details{padding:22px 0;border-bottom:1px solid #dfe2d8}.wallet-guide summary{cursor:pointer;font-size:19px;font-weight:650;line-height:1.5}.wallet-guide p{line-height:1.7;max-width:78ch}.wallet-command{padding:18px;background:#f0f2eb;border-radius:12px;overflow:auto;font-size:13px;line-height:1.7;white-space:pre}.wallet-guide dt{font-weight:650;margin-top:16px}.wallet-guide dd{margin:6px 0 14px;overflow-wrap:anywhere}

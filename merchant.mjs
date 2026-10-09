@@ -22,14 +22,15 @@ export class MerchantCatalog{
    this.commit({schema:1,profile:{id:OWNER,name:'Veylo Studio',bio:'Independent digital products.'},items});
   }
  }
- own(actor){if(actor!==OWNER)throw Error('Seller authorization required.');}
+ own(actor){if(actor!==OWNER&&!this.store.state.sellerAccounts?.[actor])throw Error('Seller authorization required.');}
  commit(next){const previous=this.store.state.merchantCatalog;this.store.state.merchantCatalog=next;try{this.store.persist();}catch(e){this.store.state.merchantCatalog=previous;throw e;}}
  data(){return this.store.state.merchantCatalog;}
- publicItem(p){const {delivery,...item}=p;return {...item,seller:this.data().profile.name,...(delivery?{fileName:delivery.name,fileSize:delivery.bytes,fileHash:delivery.sha256}: {})};}
+ publicItem(p){const {delivery,...item}=p;return {...item,seller:this.profileFor(p.sellerId).name,...(delivery?{fileName:delivery.name,fileSize:delivery.bytes,fileHash:delivery.sha256}: {})};}
  list(){return Object.values(this.data().items).filter(p=>p.status==='published').map(p=>this.publicItem(p));}
  archived(){return Object.values(this.data().items).filter(p=>p.status!=='published').map(p=>this.publicItem(p));}
- dashboard(actor){this.own(actor);return {profile:{...this.data().profile},products:Object.values(this.data().items).map(p=>this.publicItem(p))};}
- get(id='fieldnotes',includeArchived=false){const p=this.data().items[id];if(!p||(!includeArchived&&p.status!=='published'))throw Error('This product is not available for new purchases.');return structuredClone({...p,seller:this.data().profile.name});}
+ profileFor(actor=OWNER){if(actor===OWNER)return {...this.data().profile};const a=this.store.state.sellerAccounts?.[actor];if(!a)throw Error('Seller not found.');return {id:a.id,name:a.name,bio:a.bio};}
+ dashboard(actor){this.own(actor);return {profile:this.profileFor(actor),products:Object.values(this.data().items).filter(p=>p.sellerId===actor).map(p=>this.publicItem(p))};}
+ get(id='fieldnotes',includeArchived=false){const p=this.data().items[id];if(!p||(!includeArchived&&p.status!=='published'))throw Error('This product is not available for new purchases.');return structuredClone({...p,seller:this.profileFor(p.sellerId).name});}
  profile(actor,input){this.own(actor);const next=structuredClone(this.data());next.profile={id:OWNER,name:text(input.name,'Store name',60),bio:text(input.bio,'Store description',500)};this.commit(next);return {...next.profile};}
  putAsset(name,bytes){name=filename(name);if(!bytes.length||bytes.length>MAX_FILE)throw Error('Upload a non-empty file of up to 8 MiB.');const sha256=digest(bytes),target=path.join(this.assetDir,sha256);try{fs.writeFileSync(target,bytes,{flag:'wx',mode:0o600});}catch(e){if(e.code!=='EEXIST')throw e;if(digest(fs.readFileSync(target))!==sha256)throw Error('Stored file integrity check failed.');}return {schema:'veylo.delivery.v1',sha256,bytes:bytes.length,name};}
  publish(actor,input){
@@ -37,7 +38,7 @@ export class MerchantCatalog{
   if(!['Software','Design','Audio','Writing','Templates','Other'].includes(category))throw Error('Choose a supported category.');
   if(typeof input.fileBase64!=='string'||input.fileBase64.length>Math.ceil(MAX_FILE/3)*4||! /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(input.fileBase64))throw Error('Invalid file encoding.');
   const delivery=this.putAsset(input.fileName,Buffer.from(input.fileBase64,'base64'));
-  const p={id:'product-'+randomUUID(),sellerId:OWNER,name,description,category,version,...pricing,asset:'ZEC',kind:'Digital download',seller:this.data().profile.name,tone:({Software:'blue',Design:'purple',Audio:'green',Writing:'terra',Templates:'gold',Other:'rose'})[category],mark:name.replace(/[^a-z0-9]/gi,'').slice(0,2).toUpperCase()||'V',format:delivery.name.split('.').pop().toUpperCase()+' download',download:'/api/download',delivery,status:'published'};
+  const p={id:'product-'+randomUUID(),sellerId:actor,name,description,category,version,...pricing,asset:'ZEC',kind:'Digital download',seller:this.profileFor(actor).name,tone:({Software:'blue',Design:'purple',Audio:'green',Writing:'terra',Templates:'gold',Other:'rose'})[category],mark:name.replace(/[^a-z0-9]/gi,'').slice(0,2).toUpperCase()||'V',format:delivery.name.split('.').pop().toUpperCase()+' download',download:'/api/download',delivery,status:'published'};
   const next=structuredClone(this.data());next.items[p.id]=p;this.commit(next);return this.publicItem(p);
  }
  setStatus(actor,id,status){this.own(actor);if(!['published','archived'].includes(status))throw Error('Invalid product status.');const next=structuredClone(this.data()),p=next.items[id];if(!p||p.sellerId!==actor)throw Error('Product not found.');if(status==='published'&&!p.delivery)throw Error('A downloadable file is required.');p.status=status;this.commit(next);return this.publicItem(p);}

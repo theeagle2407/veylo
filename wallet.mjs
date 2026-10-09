@@ -85,7 +85,7 @@ export class Wallet {
  async send(address,value,memo){
   this.invalidateSnapshot();
   try{
-  const result=await this.run(['send','--identity',this.config.identity,'--address',address,'--value',String(value),'--memo',memo,'--server','zecrocks']);
+  const result=await this.run(['send',this.config.account,'--identity',this.config.identity,'--address',address,'--value',String(value),'--memo',memo,'--server','zecrocks']);
   const ids=result.stdout.split(/\r?\n/).map(s=>s.trim()).filter(s=>TX.test(s));
   if(ids.length!==1)throw Error('No unambiguous transaction ID returned.');
   return ids[0];
