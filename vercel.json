@@ -5,11 +5,11 @@
   "rewrites": [
     {
       "source": "/",
-      "destination": "https://table-pixels-closest-contain.trycloudflare.com/"
+      "destination": "https://website-bluetooth-spa-departments.trycloudflare.com/"
     },
     {
       "source": "/:path*",
-      "destination": "https://table-pixels-closest-contain.trycloudflare.com/:path*"
+      "destination": "https://website-bluetooth-spa-departments.trycloudflare.com/:path*"
     }
   ]
 }
