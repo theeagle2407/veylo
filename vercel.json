@@ -1,15 +1,25 @@
 {
   "version": 2,
-  "buildCommand": null,
+  "buildCommand": "node scripts/build-cloud-wallet.mjs",
   "outputDirectory": "vercel-public",
-  "rewrites": [
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "fluid": true,
+  "functions": {
+    "api/hosting-check.mjs": {
+      "includeFiles": "cloud-bin/**",
+      "excludeFiles": "{tools/nu7-wallet/**,.veylo-cloud-build/**,data/**,test/**}",
+      "maxDuration": 60
+    }
+  },
+  "routes": [
     {
-      "source": "/",
-      "destination": "https://website-bluetooth-spa-departments.trycloudflare.com/"
+      "src": "^/api/hosting-check/?$",
+      "dest": "/api/hosting-check"
     },
     {
-      "source": "/:path*",
-      "destination": "https://website-bluetooth-spa-departments.trycloudflare.com/:path*"
+      "src": "/(.*)",
+      "dest": "https://website-bluetooth-spa-departments.trycloudflare.com/$1"
     }
   ]
 }

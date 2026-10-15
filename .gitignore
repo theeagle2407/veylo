@@ -9,3 +9,8 @@ data/
 veylo-pass-*.json
 *.bak
 *.backup-*
+
+# Local cloud build output and diagnostic backup
+/.veylo-cloud-build/
+/cloud-bin/
+/.veylo-cloud-check-backup/
