@@ -7,7 +7,7 @@ import {Readable} from 'node:stream';
 import {randomBytes, randomUUID, generateKeyPairSync, sign, createHash} from 'node:crypto';
 import {createClient} from '@libsql/client';
 import {CloudVault} from '../cloud-state.mjs';
-import {createCloudHandler, TRANSFER_BYTES} from '../cloud-runtime.mjs';
+import {createCloudHandler, readPublicCloudFiles, TRANSFER_BYTES} from '../cloud-runtime.mjs';
 import {createCloudFetch} from '../public/cloud-transport.mjs';
 import {newState, requestPayload} from '../core.mjs';
 
@@ -79,7 +79,7 @@ async function fixture(t, {live = true, simulation = false} = {}) {
   async function read() {const v = vault(), l = await v.acquire(); try {return await v.readFiles(l);} finally {await v.release(l);}}
   async function change(fn) {const v = vault(), l = await v.acquire(); try {const files = await v.readFiles(l); await fn(files); await v.checkpoint(l, files);} finally {await v.release(l);}}
   return {handler, native, read, change, counters, audit, height: n => height = n, paid: async value => {invoice = value; height = 140; await change(files => {const meta = JSON.parse(files.get('runtime.json')); if (meta.walletSnapshot) meta.walletSnapshot.finishedAt = Date.now() - 11000; files.set('runtime.json', Buffer.from(JSON.stringify(meta)));});},
-    fault: fn => checkpointFault = fn, failSend: () => sendFault = true, key: state.publicKey};
+    fault: fn => checkpointFault = fn, failSend: () => sendFault = true, key: state.publicKey, vault, storage: first.client};
 }
 
 async function call(handler, route, body, {cookie = '', id = randomUUID(), connector, headers: extra = {}} = {}) {
@@ -182,7 +182,7 @@ test('a lost storage acknowledgement before refund sending blocks all send attem
   assert.equal(f.counters.send || 0, 0);
 });
 
-test('busy requests never release another invocation’s mutex or distributed lease', {timeout: 10000}, async t => {
+test('public browsing stays available during wallet work without releasing or changing its lease', {timeout: 10000}, async t => {
   const f = await fixture(t), cookie = await owner(f);
   let release, started;
   const ready = new Promise(resolve => started = resolve), gate = new Promise(resolve => release = resolve);
@@ -193,11 +193,69 @@ test('busy requests never release another invocation’s mutex or distributed le
   t.after(() => release());
   const pending = call(handler, '/api/cloud/wallet-check', {}, {cookie, id});
   await ready;
-  assert.equal((await call(handler, '/api/catalog')).status, 503);
-  assert.equal((await call(handler, '/api/catalog')).status, 503);
-  assert.equal((await call(f.handler(), '/api/catalog')).status, 503);
+  const before = (await f.storage.execute('SELECT owner, fence, revision, manifest FROM veylo_cloud_root_v1 WHERE scope = \'main\'')).rows[0];
+  const replies = await Promise.all([
+    call(handler, '/api/catalog'), call(handler, '/api/notices'), call(handler, '/api/reviews'),
+    call(f.handler(), '/api/product?id=fieldnotes'), call(f.handler(), '/api/cloud/health'),
+  ]);
+  for (const reply of replies) {
+    assert.equal(reply.status, 200, reply.bytes.toString());
+    assert.ok(!reply.bytes.includes(Buffer.from(CODE)), 'public replies cannot disclose the seller code');
+    assert.ok(!reply.bytes.includes(Buffer.from('PRIVATE KEY')), 'public replies cannot disclose signing keys');
+  }
+  assert.equal(replies[0].json().paymentMode, 'testnet');
+  assert.equal(replies[3].json().stats.purchases, 0);
+  const after = (await f.storage.execute('SELECT owner, fence, revision, manifest FROM veylo_cloud_root_v1 WHERE scope = \'main\'')).rows[0];
+  assert.deepEqual(after, before, 'browsing must not write state or release the active wallet lease');
+  assert.equal((await call(handler, '/api/seller')).status, 503);
+  assert.equal((await call(f.handler(), '/api/challenges', {id: randomUUID()})).status, 503);
   release(); assert.equal((await pending).status, 202);
   assert.equal((await finish(f, '/api/cloud/wallet-check', {}, {cookie, id})).status, 200);
+});
+
+test('public reads recover from concurrent chunk collection and reject damaged committed data', async t => {
+  const f = await fixture(t), reader = f.vault();
+  const execute = reader.client.execute.bind(reader.client);
+  let raced = false;
+  reader.client.execute = async statement => {
+    if (!raced && typeof statement === 'object' && statement.sql.startsWith('SELECT id, payload, plain_bytes')) {
+      raced = true;
+      await f.change(files => {
+        const state = JSON.parse(files.get('data/state.json'));
+        state.notices.push({id: 'new-committed-notice', product: 'fieldnotes', version: '1.0'});
+        files.set('data/state.json', Buffer.from(JSON.stringify(state)));
+      });
+      const root = (await execute({sql: 'SELECT revision, manifest FROM veylo_cloud_root_v1 WHERE scope = ?', args: ['main']})).rows[0];
+      const current = reader.decodeManifest(root.manifest, Number(root.revision));
+      const keep = [...new Set(current.files.flatMap(file => file.chunks))];
+      await execute({sql: `DELETE FROM veylo_cloud_chunks_v1 WHERE scope = ? AND id NOT IN (${keep.map(() => '?').join(',')})`, args: ['main', ...keep]});
+    }
+    return execute(statement);
+  };
+  const files = await readPublicCloudFiles(reader);
+  assert.ok(raced);
+  assert.equal(JSON.parse(files.get('data/state.json')).notices[0].id, 'new-committed-notice');
+  assert.deepEqual([...files.keys()].sort(), ['config.json', 'data/state.json']);
+  const root = (await execute({sql: 'SELECT revision, manifest FROM veylo_cloud_root_v1 WHERE scope = ?', args: ['main']})).rows[0];
+  const manifest = reader.decodeManifest(root.manifest, Number(root.revision));
+  const id = manifest.files.find(file => file.name === 'data/state.json').chunks[0];
+  await execute({sql: 'UPDATE veylo_cloud_chunks_v1 SET payload = ? WHERE scope = ? AND id = ?', args: [Buffer.from('damaged'), 'main', id]});
+  await assert.rejects(readPublicCloudFiles(reader), error => error.code === 'VEYLO_CLOUD_INTEGRITY');
+});
+
+test('public reads are fresh and do not persist read-operation records', async t => {
+  const f = await fixture(t), handler = f.handler();
+  const before = (await f.storage.execute("SELECT fence, revision FROM veylo_cloud_root_v1 WHERE scope = 'main'")).rows[0];
+  assert.equal((await call(handler, '/api/notices')).json().length, 0);
+  const after = (await f.storage.execute("SELECT fence, revision FROM veylo_cloud_root_v1 WHERE scope = 'main'")).rows[0];
+  assert.deepEqual(after, before);
+  await f.change(files => {
+    const state = JSON.parse(files.get('data/state.json'));
+    state.notices.push({id: 'fresh-notice', product: 'fieldnotes', version: '1.0'});
+    files.set('data/state.json', Buffer.from(JSON.stringify(state)));
+  });
+  assert.equal((await call(handler, '/api/notices')).json()[0].id, 'fresh-notice');
+  assert.equal(f.counters.sync || 0, 0);
 });
 
 test('Preview syncs the imported wallet but cannot send a refund', async t => {
@@ -303,4 +361,58 @@ test('repeated storage failures surface after bounded retries instead of spinnin
   const fetch = createCloudFetch(async () => {calls++; return Response.json({code: 'VEYLO_CLOUD_RETRY', error: 'storage unavailable'}, {status: 503});}, {origin: ORIGIN, pause: async () => {}});
   const response = await fetch('/api/catalog');
   assert.equal(response.status, 503); assert.equal(calls, 4);
+});
+
+test('browser wallet requests queue while public browsing can finish independently', async () => {
+  let release, began;
+  const gate = new Promise(resolve => release = resolve), started = new Promise(resolve => began = resolve);
+  const seen = [];
+  const cloud = createCloudFetch(async (input) => {
+    seen.push(input);
+    if (input === '/api/seller') {began(); await gate;}
+    return Response.json({ok: true});
+  }, {origin: ORIGIN});
+  const first = cloud('/api/seller');
+  await started;
+  const second = cloud('/api/challenges', {method: 'POST', body: '{}'});
+  try {
+    assert.equal((await cloud('/api/catalog')).status, 200);
+    assert.deepEqual(seen, ['/api/seller', '/api/catalog']);
+  } finally {release();}
+  await Promise.all([first, second]);
+  assert.deepEqual(seen, ['/api/seller', '/api/catalog', '/api/challenges']);
+});
+
+test('wait messages distinguish contention from saved wallet progress and clear on completion', async () => {
+  const waits = [], ended = [];
+  let count = 0;
+  const cloud = createCloudFetch(async () => ++count === 1
+    ? Response.json({code: 'VEYLO_CLOUD_BUSY'}, {status: 503})
+    : count === 2 ? Response.json({pending: true, message: 'Wallet progress saved. Finishing the request.'}, {status: 202})
+    : Response.json({ok: true}), {
+    origin: ORIGIN, pause: async () => {},
+    onWait: (message, id) => waits.push({message, id}), onWaitEnd: id => ended.push(id),
+  });
+  await cloud('/api/check-payment', {method: 'POST', body: '{}'});
+  assert.match(waits[0].message, /another request/i);
+  assert.doesNotMatch(waits[0].message, /wallet|saved/i);
+  assert.equal(waits[1].message, 'Wallet progress saved. Finishing the request.');
+  assert.equal(waits[0].id, waits[1].id);
+  assert.deepEqual(ended, [waits[0].id]);
+});
+
+test('a failed queued request releases the next operation and clears its wait notice', async () => {
+  const waits = [], ended = [], seen = [];
+  const cloud = createCloudFetch(async input => {
+    seen.push(input);
+    if (input === '/api/seller') return Response.json({code: 'VEYLO_CLOUD_RETRY', error: 'Storage unavailable'}, {status: 503});
+    return Response.json({ok: true});
+  }, {origin: ORIGIN, pause: async () => {}, onWait: (message, id) => waits.push({message, id}), onWaitEnd: id => ended.push(id)});
+  const first = cloud('/api/seller'), second = cloud('/api/challenges', {method: 'POST', body: '{}'});
+  assert.equal((await first).status, 503);
+  assert.equal((await second).status, 200);
+  assert.deepEqual(seen, ['/api/seller', '/api/seller', '/api/seller', '/api/seller', '/api/challenges']);
+  assert.equal(waits.length, 3);
+  for (const wait of waits) assert.doesNotMatch(wait.message, /wallet|saved/i);
+  assert.deepEqual(ended, [waits[0].id]);
 });

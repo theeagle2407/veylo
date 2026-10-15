@@ -19,6 +19,7 @@ const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const TX = /^[a-f0-9]{64}$/;
 const sha = value => createHash('sha256').update(value).digest('hex');
 const pendingStates = ['sending', 'unknown', 'broadcast'];
+const PUBLIC_READS = new Set(['/api/catalog', '/api/product', '/api/reviews', '/api/notices', '/api/cloud/health']);
 const safeName = name => typeof name === 'string' && /^[A-Za-z0-9._/-]{1,240}$/.test(name) &&
   !name.startsWith('/') && !name.split('/').some(p => !p || p === '.' || p === '..') &&
   (name.startsWith('data/') || name.startsWith('wallet/') || ['config.json', 'runtime.json', 'identity.txt'].includes(name));
@@ -50,6 +51,58 @@ function writeResponse(res, buffered) {
   for (const [k, v] of buffered.headers) res.setHeader(k, v);
   res.statusCode = buffered.statusCode;
   res.end(buffered.payload);
+}
+
+function cloudSettings(files, allowSimulation) {
+  if (!files.has('data/state.json') || !files.has('config.json')) throw problem('VEYLO_CLOUD_NOT_IMPORTED', 'Application data has not been imported into this deployment environment.');
+  const config = JSON.parse(files.get('config.json').toString('utf8'));
+  if (config.schema !== 1 || !UUID.test(config.account || '') || typeof config.sellerCode !== 'string' || config.sellerCode.length < 12 || config.paymentMode !== 'testnet' && !(allowSimulation && config.paymentMode === 'simulation')) throw Error('The imported cloud settings are invalid.');
+  return config;
+}
+
+// Public pages need committed application data, never the wallet database or a
+// writer lease. Authenticate one captured revision and only its selected files.
+export async function readPublicCloudFiles(vault) {
+  const integrity = () => problem('VEYLO_CLOUD_INTEGRITY', 'Stored application data could not be authenticated.');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const result = await vault.client.execute({sql: 'SELECT revision, manifest FROM veylo_cloud_root_v1 WHERE scope = ?', args: [vault.scope]});
+    if (result.rows.length !== 1) throw problem('VEYLO_CLOUD_NOT_IMPORTED', 'Application data has not been imported into this deployment environment.');
+    const row = result.rows[0], revision = Number(row.revision);
+    if (!Number.isSafeInteger(revision) || revision < 0) throw integrity();
+    const manifest = vault.decodeManifest(row.manifest, revision);
+    const selected = ['config.json', 'data/state.json'].map(name => manifest?.files.find(file => file.name === name));
+    if (selected.some(file => !file)) throw problem('VEYLO_CLOUD_NOT_IMPORTED', 'Application data has not been imported into this deployment environment.');
+    if (selected.reduce((sum, file) => sum + file.bytes, 0) > 16 * 1048576) throw problem('VEYLO_CLOUD_INVALID', 'Application metadata exceeds the supported read size.');
+    const ids = [...new Set(selected.flatMap(file => file.chunks))], chunks = new Map();
+    let missing = false;
+    for (let offset = 0; offset < ids.length; offset += 2) {
+      const group = ids.slice(offset, offset + 2);
+      const rows = await vault.client.execute({sql: `SELECT id, payload, plain_bytes FROM veylo_cloud_chunks_v1 WHERE scope = ? AND id IN (${group.map(() => '?').join(',')})`, args: [vault.scope, ...group]});
+      if (rows.rows.length !== group.length) {missing = true; break;}
+      for (const item of rows.rows) {
+        if (!group.includes(item.id) || chunks.has(item.id)) throw integrity();
+        const bytes = vault.open(item.payload, 'chunk:' + item.id);
+        if (bytes.length !== Number(item.plain_bytes) || bytes.length > 65536 || vault.tag(bytes) !== item.id) throw integrity();
+        chunks.set(item.id, bytes);
+      }
+    }
+    if (missing) {
+      // A concurrent writer may commit and collect an older revision while we
+      // read it. Restart only when that revision really changed; fail closed if
+      // the current committed snapshot itself has missing or damaged chunks.
+      const current = await vault.client.execute({sql: 'SELECT revision FROM veylo_cloud_root_v1 WHERE scope = ?', args: [vault.scope]});
+      if (current.rows.length === 1 && Number(current.rows[0].revision) > revision) continue;
+      throw integrity();
+    }
+    const files = new Map();
+    for (const file of selected) {
+      const bytes = Buffer.concat(file.chunks.map(id => chunks.get(id)));
+      if (bytes.length !== file.bytes || vault.tag(bytes) !== file.digest) throw integrity();
+      files.set(file.name, bytes);
+    }
+    return files;
+  }
+  throw problem('VEYLO_CLOUD_RETRY', 'Application data changed during the read. Retry shortly.');
 }
 
 export function restoreCloudFiles(directory, files) {
@@ -357,15 +410,33 @@ export function createCloudHandler({env = process.env, vault: suppliedVault, wal
       }
       if (!route.startsWith('/api/')) return json(res, 404, {error: 'Not found.'});
       if (!['GET', 'POST'].includes(req.method)) return json(res, 405, {error: 'Use GET or POST.'}, {Allow: 'GET, POST'});
+      vault ??= new CloudVault(cloudClient(env), env.VEYLO_CLOUD_KEY, {scope: production ? 'main' : 'preview', ttlMs: 300000});
+      if (req.method === 'GET' && PUBLIC_READS.has(route)) {
+        const files = await readPublicCloudFiles(vault), config = cloudSettings(files, allowSimulation);
+        if (route === '/api/cloud/health') return json(res, 200, {ok: true, storage: 'encrypted', network: 'Zcash testnet', mode: production && env.VEYLO_CLOUD_MODE === 'live' && config.active === true ? 'live' : 'scan-only', stateImported: true});
+        directory = fs.mkdtempSync(path.join(os.tmpdir(), 'veylo-public-read-'));
+        fs.chmodSync(directory, 0o700);
+        restoreCloudFiles(directory, files);
+        const noWallet = () => {throw problem('VEYLO_CLOUD_INVALID', 'Public browsing cannot execute wallet operations.');};
+        const app = createVeyloApp({requireExistingState: true, env: {
+          VEYLO_BIND_HOST: '0.0.0.0', VEYLO_PUBLIC_ORIGIN: `https://${req.headers.host}`,
+          VEYLO_DATA_DIR: path.join(directory, 'data'), VEYLO_PAYMENT_MODE: config.paymentMode,
+          VEYLO_SELLER_CODE: config.sellerCode, VEYLO_SELLER_ACCOUNT: config.account,
+          VEYLO_WALLET_BINARY: 'unavailable-for-public-reads', VEYLO_SELLER_WALLET: path.join(directory, 'wallet'), VEYLO_SELLER_IDENTITY: path.join(directory, 'identity.txt'),
+        }, walletFactory: () => ({exclusive: noWallet, run: noWallet, snapshot: noWallet})});
+        // Reuse the established public projections; do not expose state files,
+        // credentials or purchase records, and never checkpoint a public read.
+        const buffered = bufferResponse();
+        await app.handler(req, buffered);
+        writeResponse(res, buffered);
+        return;
+      }
       if (busy) return json(res, 503, {code: 'VEYLO_CLOUD_BUSY', error: 'The store is finishing another request. Retry shortly.'}, {'Retry-After': '1'});
       busy = true; ownsBusy = true;
-      vault ??= new CloudVault(cloudClient(env), env.VEYLO_CLOUD_KEY, {scope: production ? 'main' : 'preview', ttlMs: 300000});
       lease = await vault.acquire();
       stopHeartbeat = vault.startHeartbeat(lease, () => abort.abort());
       const files = await vault.readFiles(lease);
-      if (!files.has('data/state.json') || !files.has('config.json')) throw problem('VEYLO_CLOUD_NOT_IMPORTED', 'Application data has not been imported into this deployment environment.');
-      const config = JSON.parse(files.get('config.json').toString('utf8'));
-      if (config.schema !== 1 || !UUID.test(config.account || '') || typeof config.sellerCode !== 'string' || config.sellerCode.length < 12 || config.paymentMode !== 'testnet' && !(allowSimulation && config.paymentMode === 'simulation')) throw Error('The imported cloud settings are invalid.');
+      const config = cloudSettings(files, allowSimulation);
       if (!/^network\s*=\s*"test"\s*$/m.test(files.get('wallet/keys.toml')?.toString('utf8') || '')) throw problem('VEYLO_CLOUD_INVALID', 'Only a testnet wallet can run in this deployment.');
       directory = fs.mkdtempSync(path.join(os.tmpdir(), 'veylo-request-'));
       fs.chmodSync(directory, 0o700);
