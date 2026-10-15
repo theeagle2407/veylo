@@ -36,7 +36,7 @@ export class MerchantCatalog{
  publish(actor,input){
   this.own(actor);const name=text(input.name,'Product name',80),description=text(input.description,'Product description',1000,20),category=text(input.category,'Category',30),version=text(input.version,'Version',24),pricing=amount(input.price);
   if(!['Software','Design','Audio','Writing','Templates','Other'].includes(category))throw Error('Choose a supported category.');
-  if(typeof input.fileBase64!=='string'||input.fileBase64.length>Math.ceil(MAX_FILE/3)*4||! /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(input.fileBase64))throw Error('Invalid file encoding.');
+  if(typeof input.fileBase64!=='string'||input.fileBase64.length>Math.ceil(MAX_FILE/3)*4||input.fileBase64.length%4!==0||!/^[A-Za-z0-9+/]*={0,2}$/.test(input.fileBase64))throw Error('Invalid file encoding.');
   const delivery=this.putAsset(input.fileName,Buffer.from(input.fileBase64,'base64'));
   const p={id:'product-'+randomUUID(),sellerId:actor,name,description,category,version,...pricing,asset:'ZEC',kind:'Digital download',seller:this.profileFor(actor).name,tone:({Software:'blue',Design:'purple',Audio:'green',Writing:'terra',Templates:'gold',Other:'rose'})[category],mark:name.replace(/[^a-z0-9]/gi,'').slice(0,2).toUpperCase()||'V',format:delivery.name.split('.').pop().toUpperCase()+' download',download:'/api/download',delivery,status:'published'};
   const next=structuredClone(this.data());next.items[p.id]=p;this.commit(next);return this.publicItem(p);

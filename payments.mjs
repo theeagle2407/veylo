@@ -68,6 +68,10 @@ export class Payments {
   // Withdrawal may occur while the wallet snapshot is awaiting I/O.
   if(q.status!=='requested')throw Error('Refund request was withdrawn before payment processing.');
   q.value=p.payment?.value;if(!Number.isSafeInteger(q.value)||q.value<=0)throw Error('Invalid original payment amount.');q.memo='veylo:refund:'+q.id;q.status='sending';q.attemptedAt=new Date().toISOString();this.store.persist();
+  // Cloud storage must acknowledge the intent before a wallet can spend.
+  // A failed checkpoint leaves an attempted refund for reconciliation, never a retry.
+  await this.store.flush?.();
+  if(typeof this.wallet.deferRefund==='function')return this.wallet.deferRefund(q);
   try{q.txid=await this.wallet.send(q.destination,q.value,q.memo);q.status='broadcast';this.store.persist();return q;}
   catch{q.status='unknown';this.store.persist();throw Error('Refund outcome needs checking. No automatic retry will occur. Use Check confirmations and inspect the seller wallet.');}
  });}

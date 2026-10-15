@@ -1,0 +1,18 @@
+# Private local files and generated build output; wallet source stays included.
+.env*
+data/
+*.age
+*.key
+*.pem
+veylo-pass-*.json
+node_modules/
+.git/
+.vercel/
+.veylo-cloud/
+.veylo-cloud-build/
+cloud-bin/
+.veylo-cloud-check-backup/
+*.log
+*.bak
+*.backup-*
+.DS_Store

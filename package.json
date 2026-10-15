@@ -12,5 +12,8 @@
     "test": "node --test test/*.test.mjs",
     "check": "node --check server.mjs && node --check core.mjs && node --check wallet.mjs && node --check payments.mjs && node --check public/app.js",
     "dev:testnet": "node --env-file=.env.testnet server.mjs"
+  },
+  "dependencies": {
+    "@libsql/client": "0.18.0"
   }
 }

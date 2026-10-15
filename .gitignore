@@ -14,3 +14,12 @@ veylo-pass-*.json
 /.veylo-cloud-build/
 /cloud-bin/
 /.veylo-cloud-check-backup/
+
+# Private cloud credentials and temporary migration data
+/.env.cloud
+/.veylo-cloud/
+
+# Private cloud state and deployment link
+/.vercel/
+*.key
+.vercel

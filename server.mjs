@@ -15,43 +15,54 @@ import {fileURLToPath} from 'node:url';
 import {randomBytes,timingSafeEqual} from 'node:crypto';
 import {Store,newState,product} from './core.mjs';
 const root=path.dirname(fileURLToPath(import.meta.url));
-const dir=process.env.VEYLO_DATA_DIR||path.join(root,'data');fs.mkdirSync(dir,{recursive:true,mode:0o700});
+// Importing this module must never open a port or create a new merchant identity.
+export function createVeyloApp(options={}) {
+const env=options.env||process.env;
+const dir=env.VEYLO_DATA_DIR||path.join(root,'data');fs.mkdirSync(dir,{recursive:true,mode:0o700});
 const filename=path.join(dir,'state.json');
+if(options.requireExistingState&&!fs.existsSync(filename))throw Error('Imported application state is required. No new merchant identity was created.');
 function save(s){fs.writeFileSync(filename+'.tmp',JSON.stringify(s),{mode:0o600});fs.renameSync(filename+'.tmp',filename);}
 const store=new Store(fs.existsSync(filename)?JSON.parse(fs.readFileSync(filename,'utf8')):newState(),save);save(store.state);
+if(options.flush)store.flush=()=>options.flush(store);
 const accounts=new SellerAccounts(store);
+if(options.accountSessions)accounts.sessions=options.accountSessions;
 const accountToken=req=>req.headers.cookie?.match(/(?:^|;\s*)veylo_account=([a-f0-9]{64})(?:;|$)/)?.[1];
 const merchant=new MerchantCatalog(store,{root,assetDir:path.join(dir,'assets')});
 store.productLookup=(id,archived=false)=>merchant.get(id,archived);
-const live=process.env.VEYLO_PAYMENT_MODE==='testnet';
-if(process.env.VEYLO_PAYMENT_MODE&&!['testnet','simulation'].includes(process.env.VEYLO_PAYMENT_MODE))throw Error('Invalid payment mode.');
-const walletConfig={binary:process.env.VEYLO_WALLET_BINARY,directory:process.env.VEYLO_SELLER_WALLET,identity:process.env.VEYLO_SELLER_IDENTITY,account:process.env.VEYLO_SELLER_ACCOUNT};
+const live=env.VEYLO_PAYMENT_MODE==='testnet';
+if(env.VEYLO_PAYMENT_MODE&&!['testnet','simulation'].includes(env.VEYLO_PAYMENT_MODE))throw Error('Invalid payment mode.');
+const walletConfig={binary:env.VEYLO_WALLET_BINARY,directory:env.VEYLO_SELLER_WALLET,identity:env.VEYLO_SELLER_IDENTITY,account:env.VEYLO_SELLER_ACCOUNT};
 if(live&&Object.values(walletConfig).some(v=>!v))throw Error('Missing testnet wallet settings. Run the setup script.');
-const payments=live?new Payments(store,new Wallet(walletConfig),OWNER):null;
-const jobs=new ConnectorJobs(store,accounts),remotePayments=new Map();
-function sellerPayments(actor){if(actor===OWNER)return payments;if(!live)throw Error('New seller payments require testnet mode.');if(!remotePayments.has(actor))remotePayments.set(actor,new Payments(store,new RemoteWallet(actor,jobs),actor));return remotePayments.get(actor);}
+const payments=live?new Payments(store,options.walletFactory?options.walletFactory(walletConfig,store):new Wallet(walletConfig),OWNER):null;
+const jobs=options.jobsFactory?options.jobsFactory(store,accounts):new ConnectorJobs(store,accounts),remotePayments=new Map();
+function sellerPayments(actor){if(actor===OWNER)return payments;if(!live)throw Error('New seller payments require testnet mode.');if(!remotePayments.has(actor))remotePayments.set(actor,new Payments(store,options.remoteWalletFactory?options.remoteWalletFactory(actor,jobs):new RemoteWallet(actor,jobs),actor));return remotePayments.get(actor);}
 function purchaseOwner(id){const p=store.state.purchases[id];if(!p)throw Error('Purchase not found.');return p.item?.sellerId||OWNER;}
 function requestOwner(id){const q=store.state.requests[id];if(!q)throw Error('Request not found.');return purchaseOwner(q.purchaseId);}
 function sellerActor(req){if(admin(req))return OWNER;try{return accounts.actor(accountToken(req));}catch{return null;}}
 function requireOwnRequest(actor,id){if(requestOwner(id)!==actor)throw Error('Request not found.');}
 function requireOwnProduct(actor,id){if(merchant.get(id,true).sellerId!==actor)throw Error('Product not found.');}
 function publishing(actor){if(actor!==OWNER&&(!live||!accounts.view(actor).canPublish))throw Error('Start the updated payment connector before publishing.');}
-const code=process.env.VEYLO_SELLER_CODE||randomBytes(12).toString('hex'),sessions=new Map();
-const {host,port,origin,allowedHosts,allowedOrigins,secureCookie}=hostingConfig(process.env);
-if(host!=='127.0.0.1'&&!process.env.VEYLO_SELLER_CODE)throw Error('Public hosting requires VEYLO_SELLER_CODE.');
+const code=env.VEYLO_SELLER_CODE||randomBytes(12).toString('hex'),sessions=options.sessions||new Map();
+const {host,port,origin,allowedHosts,allowedOrigins,secureCookie}=hostingConfig(env);
+if(host!=='127.0.0.1'&&!env.VEYLO_SELLER_CODE)throw Error('Public hosting requires VEYLO_SELLER_CODE.');
 const equal=(a,b)=>typeof a==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 function admin(req){const cookie=req.headers.cookie?.match(/(?:^|;\s*)veylo=([a-f0-9]+)/)?.[1];return cookie&&sessions.get(cookie)>Date.now();}
 function send(res,status,data){res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(data));}
-async function body(req,max=16384){let data='';for await(const chunk of req){data+=chunk;if(Buffer.byteLength(data)>max)throw Error('Request too large.');}return data?JSON.parse(data):{};}
-const files={'/':'index.html','/app.js':'app.js','/checkout-state.mjs':'checkout-state.mjs','/payment-watch.mjs':'payment-watch.mjs','/style.css':'style.css'};
+async function body(req,max=16384){
+ if(req.body!==undefined){const data=Buffer.isBuffer(req.body)?req.body.toString('utf8'):typeof req.body==='string'?req.body:JSON.stringify(req.body);if(Buffer.byteLength(data)>max)throw Error('Request too large.');return data?JSON.parse(data):{};}
+ let data='';for await(const chunk of req){data+=chunk;if(Buffer.byteLength(data)>max)throw Error('Request too large.');}return data?JSON.parse(data):{};
+}
+const files={'/':'index.html','/app.js':'app.js','/checkout-state.mjs':'checkout-state.mjs','/payment-watch.mjs':'payment-watch.mjs','/style.css':'style.css',...options.publicFiles};
 
-const limits=new Map();
-const server=http.createServer(async(req,res)=>{
+const limits=options.limits||new Map();
+const context={store,accounts,merchant,payments,jobs,sessions,limits,sellerActor,sellerPayments,requireOwnRequest,publishing};
+const handler=async(req,res)=>{
  res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');
  res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
  try{
   if(!allowedHosts.has(req.headers.host))return send(res,403,{error:'Host not allowed.'});
   const url=new URL(req.url,origin), route=url.pathname;
+  if(req.method==='GET'&&options.route&&await options.route({...context,req,res,url,route,body:null}))return;
   if(req.method==='POST'&&route.startsWith('/api/connector/')){
    if(req.headers.origin||req.headers.cookie)return send(res,403,{error:'Use the terminal connector.'});
    const token=req.headers.authorization?.match(/^Bearer ([a-f0-9]{64})$/)?.[1];
@@ -66,9 +77,10 @@ const server=http.createServer(async(req,res)=>{
   if(req.method==='POST'){
    if(!allowedOrigins.has(req.headers.origin))return send(res,403,{error:'Same-origin request required.'});
    if(!req.headers['content-type']?.startsWith('application/json'))return send(res,415,{error:'JSON required.'});
-   const now=Date.now(),key=req.socket.remoteAddress;let entry=limits.get(key);if(!entry||entry.until<now){entry={count:0,until:now+60000};limits.set(key,entry);}if(++entry.count>100)return send(res,429,{error:'Please wait a minute before trying again.'});
+   const now=Date.now(),key=options.rateKey?options.rateKey(req):req.socket?.remoteAddress;for(const [k,v] of limits)if(v.until<now)limits.delete(k);let entry=limits.get(key);if(!entry||entry.until<now){entry={count:0,until:now+60000};limits.set(key,entry);}if(++entry.count>100)return send(res,429,{error:'Please wait a minute before trying again.'});
    if(route==='/api/seller/products/publish'&&!sellerActor(req))return send(res,401,{error:'Seller sign-in required.'});
-   const b=await body(req,route==='/api/seller/products/publish'?12*1024*1024:16384);
+   const b=await body(req,options.bodyLimit?.(route)??(route==='/api/seller/products/publish'?12*1024*1024:16384));
+   if(options.route&&await options.route({...context,req,res,url,route,body:b}))return;
    if(route.startsWith('/api/store-account/')){
     const action=route.slice('/api/store-account/'.length);
     if(action==='register'||action==='login'){
@@ -131,8 +143,15 @@ const server=http.createServer(async(req,res)=>{
    if(files[route]){const ext=path.extname(files[route]);res.writeHead(200,{'Content-Type':({'.html':'text/html; charset=utf-8','.css':'text/css','.js':'text/javascript','.mjs':'text/javascript','.txt':'text/plain; charset=utf-8'})[ext],'Cache-Control':'no-store'});return res.end(fs.readFileSync(path.join(root,'public',files[route])));}
   }
   send(res,404,{error:'Not found.'});
- }catch(error){send(res,400,{error:error.message||'Request failed.'});}
-});
+ }catch(error){if(options.onError&&await options.onError(error,req,res))return;send(res,400,{error:error.message||'Request failed.'});}
+};
+return {...context,handler,host,port,code,live};
+}
+
+export function startLocalServer(options={}) {
+const app=createVeyloApp(options);
+const {payments,accounts,sellerPayments,host,port,code,live}=app;
+const server=http.createServer(app.handler);
 server.once('listening',()=>{
  if(!payments)return;
  const monitor={async refresh(){
@@ -146,3 +165,7 @@ server.once('listening',()=>{
 });
 server.listen(port,host,()=>{console.log(`\nVeylo: http://localhost:${port}\nSeller access code: ${host==='127.0.0.1'?code:'configured privately'}\n\n${live?'Zcash testnet payments enabled. Seller approves real testnet refunds.':'Local payment simulation. No ZEC is sent.'}\nKeep data/state.json private: it contains the merchant signing key.\n`);});
 server.on('error',e=>{console.error(e.code==='EADDRINUSE'?`Port ${port} is in use. Stop the previous server or run PORT=3003 npm run dev.`:e.message);process.exitCode=1;});
+return server;
+}
+
+if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))startLocalServer();
